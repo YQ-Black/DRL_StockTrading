@@ -24,6 +24,3 @@ class CSVProcessor():
         df.dropna(inplace=True)             # give up data NA
 
         return df
-
-# procecssor = CSVProcessor()
-# procecssor.data_pre_process('D:\science\Design\数据\AAPL.csv')

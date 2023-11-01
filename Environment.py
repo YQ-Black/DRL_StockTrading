@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 class StockTradingEnv(gymnasium.Env):
     metadata = {"render_modes": ["human"], "render_fps": 4}
 
-    def __init__(self, company, money, startDate, tradingCosts=0, obsPeriod=1):
+    def __init__(self, money, startDate=0, tradingCosts=0, obsPeriod=1, company="Apple"):
         '''
         目的：初始化环境，并配置相应参数
 
@@ -23,7 +23,7 @@ class StockTradingEnv(gymnasium.Env):
         # 基本量的设置
         self.Company = {"Apple":"AAPL", "Tesla":"TSLA", "Amazon":"AMZN", "AMD":"AMD",
                         "NVIDIA":"NVDA", "Microsoft":"MSFT", "Intel":"INTC", "Google":"GOOG"}
-
+        self.com_name = company
         self.env_name = 'StockTradingEnv'
         self.max_step = 250 #暂定
         self.asset = money
@@ -172,7 +172,6 @@ class StockTradingEnv(gymnasium.Env):
                 self.stockHold = self.stockHold
                 self.assetHis = self.asset
                 self.asset = self.cash + self.stockData['Close'][today] * self.stockHold
-            
 
         return 0
 
@@ -186,6 +185,39 @@ class StockTradingEnv(gymnasium.Env):
         print("------------------------------------")
         print('\n')
 
-    def render(self):
+    def takeRandAct(self)->int:
+        '''
+        随机在-1，0，1之间选择一个整数，作为action，用于简单测试
+        :return: -1 / 0 / 1
+        '''
+        act = np.random.randint(-1, 2, dtype=int)
+        return act
+
+    def render(self, epoch=None):
+        '''
+        绘图并按照训练epoch来命名保存保存
+        :param epoch: 表示当前是第几个epoch，用于保存图片取名时使用
+        :return: 根据数据画出股票数据和拥有资产的折线图
+        '''
+        df = self.stockData
+        fig, axes = plt.subplots(nrows=2, ncols=1, sharex=True)
+        axes[0].plot(df["Date"], df["Close"])
+        axes[0].set_title(f"{self.com_name} Stock Close Price")
+        axes[1].plot(df["Asset"])
+        axes[1].set_title("Asset Hold")
+        if epoch == None:
+            plt.savefig(fname="example.jpg")
+            plt.show()
+        else:
+            save_path = f"Figures/fig_{epoch}.jpg"
+            plt.savefig(fname=save_path)
+
+
+    def close(self):
+        '''
+        这个函数没用，不需要管
+        :return: nothing
+        '''
+        print("Closed Successfully\n")
 
 

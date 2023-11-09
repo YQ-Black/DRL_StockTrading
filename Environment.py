@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 class StockTradingEnv(gymnasium.Env):
     metadata = {"render_modes": ["human"], "render_fps": 4}
 
-    def __init__(self, money, startDate=0, tradingCosts=0, obsPeriod=1, company="Apple"):
+    def __init__(self, money, startDate=6, tradingCosts=0, obsPeriod=5, company="Apple", gamma=0.95):
         '''
         目的：初始化环境，并配置相应参数
 
@@ -19,13 +19,19 @@ class StockTradingEnv(gymnasium.Env):
         :param startDate: 开始时间(应该观察期之后才能开始)
         :param tradingCosts: 交易成本，一般是百分之几（0.01---1%）
         :param obsPeriod: 观察状态的长度。（e.g. 1表示1天，7表示7天）
+        :param gamma: 折旧率。用于计算整体的q-value
         '''
         # 基本量的设置
+
+        if(startDate<obsPeriod):
+            print("Setting wrong! please check the start date and obs period!\n")
+
+
         self.Company = {"Apple":"AAPL", "Tesla":"TSLA", "Amazon":"AMZN", "AMD":"AMD",
                         "NVIDIA":"NVDA", "Microsoft":"MSFT", "Intel":"INTC", "Google":"GOOG"}
         self.com_name = company
         self.env_name = 'StockTradingEnv'
-        self.max_step = 250 #暂定
+        self.max_step = 250-startDate #暂定，可能还要修改（总数据252行，就用250去减）
         self.asset = money
         self.startDate = startDate
         self.tradingCosts = tradingCosts
@@ -36,6 +42,7 @@ class StockTradingEnv(gymnasium.Env):
         self.cash = money
         self.assetHis = 0
         self.threshold = 0.1*money
+        self.gamma = gamma
 
         # gym库的设置
         self.state_dim = spaces.Discrete(2)  # six observations: open, Close, high, low, volumn, revenue。目前暂定open close
@@ -69,8 +76,9 @@ class StockTradingEnv(gymnasium.Env):
         :param index: observation从哪一天开始
         :return: list类型
         '''
-        return [self.stockData['Open'][index:index+self.obsPeriod].tolist(),
-                self.stockData['Close'][index:index+self.obsPeriod].tolist()]
+        # [0:2]对应第0天和第1天 [1:2]对应第1天 [0:1]对应第0天
+        return [self.stockData['Open'][index-(self.obsPeriod+1):index].tolist(),
+                self.stockData['High'][index-(self.obsPeriod+1):index].tolist()]
 
     def _get_info(self, index:int)->int:
         '''

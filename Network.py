@@ -35,7 +35,7 @@ class DQN(torch.nn.Module):
 
 
 class Agent:
-    '''
+    """
     一个DQN的agent，例化之后可以实现以下功能:
 
     1.stateProcess：对环境输出的state/observation做处理
@@ -46,15 +46,23 @@ class Agent:
     6.step_learning: 对整个股票序列数据做顺序学习
     7.
 
-    '''
+    """
 
-    def __init__(self, input_features, lossfunc="MSE", optimization="Adam", learningrate=0.01):
+    def __init__(self, input_features: int, env, lossfunc="MSE", optimization="Adam", learningrate=0.01):
+        """
+
+        :param input_features: 取决于obsPeriod和observation space的大小。  input features=（obsPeriod+1）*obs_space
+        :param lossfunc: 目前提供：MSE, L1Loss, C-E Loss
+        :param optimization: 目前提供：Adam, SGD
+        :param learningrate: 学习率，default=0.01
+        """
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.network = DQN(numberOfInputs=input_features, numberOfNeurons=256, numberOfOutputs=3)
         self.network = self.network.cuda()
         self.parameters = self.network.parameters()
         self.learningRate = learningrate
-        self.buffer = ReplayBuffer()
+        self.Buffer = ReplayBuffer()
+        self.env = env
 
         Lossfunc = {"MSE": nn.MSELoss(), "L1Loss": nn.L1Loss(), "C-E Loss": nn.CrossEntropyLoss()}
         if (lossfunc in Lossfunc):
@@ -70,26 +78,26 @@ class Agent:
         else:
             print("No such optimization, please input again!\n")
 
-    def stateProcess(self, state) -> list:
-        '''
+    def stateProcess(self, state: list) -> list:
+        """
         把环境反馈出来的observation（state）做处理，以便后续变成正确形状的张量传入神经网络
 
         :param state: 环境反馈的state
         :return: 处理过后的state
-        '''
+        """
         temp_0 = state[0]
         temp_1 = state[1]
         state = temp_0 + temp_1
         return state
 
-    def choose_action(self, state, device) -> tuple:
-        '''
+    def choose_action(self, state: list, device) -> tuple:
+        """
         根据当前的state判断哪个action的q_value最大
 
         :param state: 经过process之后的状态
         :param device: 操作使用的设备，cpu/cuda
         :return: q值最大的action序号: -1, 0, 1(int)； q_value_max: tensor(tensor(1.2957, device='cuda:0'))
-        '''
+        """
         with torch.no_grad():
             # unsqueeze：给生成的tensor多一个维度，例如原来维度是[2,7], 现在维度是[1,2,7]
             state = torch.tensor(state, dtype=torch.float32,
@@ -98,68 +106,111 @@ class Agent:
             #        requires_grad=True) torch.Size([1, x]) x=特征数
             # print(state, state.shape)
             q_value = self.network(state)
+            print(q_value, type(q_value))
             action = q_value.argmax(1).item() - 1
             q_value_max = q_value.argmax(1).item()
+            print(q_value, type(q_value))
             q_value_max = q_value[0, q_value_max]
             return q_value_max, action
 
-    def store_exp(self, experience: tuple) -> int:
-        '''
+    def QValues(self, states: list, batch_size:int):
+        """
 
-        :param experience: 一条experience, 包含state，action，reward，state_next
-        :return: 此时replaybuffer中指针index的位置
-        '''
-        index = self.buffer.push(experience)
-        return index
+        :param batch_size: 观察到的一系列状态(batch size)
+        :param states: 观察到的一系列状态(batch size)
+        :return: 最大的一组Q值: shape: torch.Size([1, batch_size])
+        """
+        # states = torch.tensor(states, dtype=torch.float32,
+        #                      device=self.device, requires_grad=True).unsqueeze(0)
+        q_values = self.network(states)
 
-    def QValue(self, state: list):
-        '''
+        q_values_list = []
 
-        :param state: 观察到的状态
-        :return: 最大的Q值: tensor(tensor(1.2957, device='cuda:0')
-        '''
-        state = torch.tensor(state, dtype=torch.float32,
-                             device=self.device, requires_grad=True).unsqueeze(0)
-        q_value = self.network(state)
-        q_value_max = q_value.argmax(1).item()
-        q_value_max = q_value[0, q_value_max]
-        return q_value_max
-
-    def batch_learning(self, batch_size, env, save=True):
-        '''
-
-        :param batch_size: 一次从buffer中抽取的数据数量
-        :param env: 交互的环境
-        :param save: 是否保存训练的模型
-        :return: 啥也没有
-        '''
-        states, actions, rewards, states_future = self.buffer.random_sample(batch_size)
-        loss = 0
         for i in range(batch_size):
-            state = states[i]
-            action = actions[i]
-            reward = rewards[i]
-            state_next = states_future[i]
-            current_q_value = self.QValue(state)
-            next_q_value = self.QValue(state_next)
-            target_q_value = reward + env.gamma * next_q_value
-            loss = loss + self.loss_fn(current_q_value, target_q_value)
+            q_value = q_values[0][i]
+            q_value = q_value.unsqueeze(0)
+            # print(q_value, q_value.shape)
+            q_index = q_value.argmax(1).item()
+            # print(q_index)
+            q_value_max = q_value[0, q_index]
+            q_value_max = [q_value_max]
+            q_values_list = q_values_list + q_value_max
+            # print(q_value[0, q_index])
 
-        loss = loss / batch_size
-        loss.backward()
-        self.optim.step()
+        q_values_max = torch.tensor(q_values_list, dtype=torch.float32,
+                                    device=self.device, requires_grad=True).unsqueeze(0)
 
-        if save == True:
-            print("Step training done! Saving model......\n")
-            torch.save(self.network, 'dqn_test.pth')
-        else:
-            print("Step training done!\n")
-            return 0
+        return q_values_max
+
+    def store_exp(self) -> int:
+        """
+        目前只能读取环境内一支股票的数据，也就是只有200多天的数据
+
+        :return: 此时replay buffer中指针index的位置
+        """
+        device = self.device
+        observation, info = self.env.reset()
+        observation = self.stateProcess(observation)
+        current_q_value, action = self.choose_action(observation, device=device)
+        current_q_value.requires_grad_(True)
+        terminated = False
+        truncated = False
+
+        print("------存储experience开始------")
+        j = 0
+        while (not terminated) and (not truncated):
+            next_obs, reward, terminated, truncated, info = self.env.step(action)
+            next_obs = self.stateProcess(next_obs)
+            exp = self.Buffer.exp_capsu(observation, action, reward, next_obs)
+            self.Buffer.push(exp)
+
+            # 把上面得到的状态S_{t+1}变为S_{t}
+            observation = next_obs
+            current_q_value, action = self.choose_action(observation, device=device)
+            current_q_value.requires_grad_(True)
+
+            j = j + 1
+            # print(f"存储第{j}条experience")
+
+        print(f"experience存储完毕，总共存储了{j}条experience")
+        print("store_exp done!\n")
 
         return 0
 
+    def batch_learning(self, batch_size: int, env, save=True):
+        """
+
+        :param batch_size: 一次从buffer中抽取的数据数量。不能超过数据总量
+        :param env: 交互的环境
+        :param save: 是否保存训练的模型
+        :return: 啥也没有
+        """
+        states, actions, rewards, states_future = self.Buffer.random_sample(batch_size, self.device)
+        # 假设batch_size=16; 两个特征,一个特征看6天（2*6=12）. states.shape: torch.Size([16, 12])
+
+        current_q_values= self.QValues(states, batch_size)
+        # print("current_q_value的shape是", current_q_values.shape)
+
+        next_q_values = self.QValues(states_future, batch_size)
+        # print("next_q_values的shape是", next_q_values.shape)
+        target_q_values = rewards + env.gamma * next_q_values
+        # print("target_q_value的shape是",target_q_values.shape)
+
+        loss = self.loss_fn(current_q_values, target_q_values)
+
+        loss.backward()
+        self.optim.step()
+
+        if save:
+            print("Batch training done! Saving model......\n")
+            torch.save(self.network, 'dqn_test.pth')
+            return 0
+        else:
+            print("Batch training done!\n")
+            return 0
+
     def step_learning(self, env, save=True, steps=1, load=False, load_buffer=False):
-        '''
+        """
         学习step次直到terminated或者truncated，保存模型
 
         :param env: 需要与agent交互的环境
@@ -168,7 +219,7 @@ class Agent:
         :param load: 是否加载模型，目前没有训练
         :param load_buffer: 是否把这次的结果存入replay buffer
         :return: 啥也不返回
-        '''
+        """
         device = self.device
         observation, info = env.reset()
         observation = self.stateProcess(observation)
@@ -203,7 +254,7 @@ class Agent:
 
             print(f"本轮总共训练了{j}次")
 
-        if save == True:
+        if save:
             print("Step training done! Saving model......\n")
             torch.save(self.network, 'dqn_test.pth')
         else:

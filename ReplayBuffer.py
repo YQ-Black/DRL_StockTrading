@@ -1,19 +1,21 @@
 import random
 from torch import tensor
+import torch
+
 
 class ReplayBuffer():
-    def __init__(self, depth = 10_00000):
-        '''
+    def __init__(self, depth=10_00000):
+        """
         对replaybuffer做初始化，并确定buffer的深度。
 
         :param depth: buffer的大小，默认为10e5
-        '''
+        """
         self.buffer = []
         self.depth = depth
         self.index = 0
         self.flag = 0
 
-    def _flag(self)->int:
+    def _flag(self) -> int:
         if self.index < self.depth:
             self.flag = self.flag
         else:
@@ -21,25 +23,24 @@ class ReplayBuffer():
 
         return self.flag
 
-    def exp_capsu(self, state, action, reward, next_state)->tuple:
+    def exp_capsu(self, state, action, reward, next_state) -> tuple:
+        reward = [reward]
         experience = (state, action, reward, next_state)
         return experience
 
-
-
-    def push(self, experience:tuple)->int:
-        '''
+    def push(self, experience: tuple) -> int:
+        """
         把一个experience放入buffer，并更新buffer指针的位置
 
         :param experience: 输入必须是tuple形式，否则sample时无法正常工作.experience中的state必须是处理成一维数据，否则无法正常工作
         :return: 返回buffer指针的index
-        '''
+        """
         index = self.index
         flag = self._flag()
-        if (index < self.depth and flag ==0):
+        if (index < self.depth and flag == 0):
             self.buffer.append(experience)
             self.index = self.index + 1
-        elif (index < self.depth and flag ==1):
+        elif (index < self.depth and flag == 1):
             self.buffer[index] = experience
             self.index = self.index + 1
         else:
@@ -48,9 +49,8 @@ class ReplayBuffer():
 
         return self.index
 
-
-    def random_sample(self, batch_size)->tuple:
-        '''
+    def random_sample(self, batch_size, device) -> tuple:
+        """
         把buffer里的数据随机抽样出batch_size个，然后进行解析。\n
 
         Examples:
@@ -65,8 +65,17 @@ class ReplayBuffer():
         :param batch_size: 随机抽取的样本的数量
         :return: 对抽取的所有样本的解析
                  states: tensor; actions: int; rewards: float; states_future: tensor
-        '''
+        """
         batch = random.sample(self.buffer, batch_size)
         states, actions, rewards, states_future = zip(*batch)
-        states = tensor(states)
+        states = tensor(states, dtype=torch.float32, device=device).unsqueeze(0)
+        actions = tensor(actions, dtype=torch.float32, device=device).unsqueeze(0)
+        states_future = tensor(states_future, dtype=torch.float32, device=device).unsqueeze(0)
+
+        rewards_list = []
+        for i in range(batch_size):
+            rewards_list = rewards_list + rewards[i]
+
+        rewards = tensor(rewards_list, dtype=torch.float32, device=device)
+
         return states, actions, rewards, states_future

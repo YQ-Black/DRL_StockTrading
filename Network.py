@@ -6,6 +6,7 @@ from ReplayBuffer import ReplayBuffer
 numberOfNeurons = 512
 dropout = 0.2
 learning_rate = 0.01
+dataset_divider = 3273  # 用于分割训练集与测试集。可灵活调整
 
 
 class DQN(torch.nn.Module):
@@ -38,18 +39,18 @@ class Agent:
     """
     一个DQN的agent，例化之后可以实现以下功能:
 
-    1.stateProcess：对环境输出的state/observation做处理
-    2.choose_action: 根据state做出最优的action
-    3.store_exp: 把experience存入buffer
-    4.QValue: 找出最大的q value
-    5.batch_learning: 从replay buffer中随机学习
-    6.step_learning: 对整个股票序列数据做顺序学习
-    7.
+    1.stateProcess：对环境输出的state/observation做处理\n
+    2.choose_action: 根据state做出最优的action\n
+    3.store_exp: 把experience存入buffer\n
+    4.QValues: 找出最大的q value\n
+    5.batch_learning: 从replay buffer中随机学习\n
+    6.step_learning: 对整个股票序列数据做顺序学习\n
 
     """
 
     def __init__(self, input_features: int, env, lossfunc="MSE", optimization="Adam", learningrate=0.01):
         """
+        初始化Agent类，用于后续其他操作。
 
         :param input_features: 取决于obsPeriod和observation space的大小。  input features=（obsPeriod+1）*obs_space
         :param lossfunc: 目前提供：MSE, L1Loss, C-E Loss
@@ -96,7 +97,7 @@ class Agent:
 
         :param state: 经过process之后的状态
         :param device: 操作使用的设备，cpu/cuda
-        :return: q值最大的action序号: -1, 0, 1(int)； q_value_max: tensor(tensor(1.2957, device='cuda:0'))
+        :return: ①q_value_max: tensor(tensor(1.2957, device='cuda:0')) ②q值最大的action序号: -1, 0, 1(int)
         """
         with torch.no_grad():
             # unsqueeze：给生成的tensor多一个维度，例如原来维度是[2,7], 现在维度是[1,2,7]
@@ -109,12 +110,13 @@ class Agent:
             print(q_value, type(q_value))
             action = q_value.argmax(1).item() - 1
             q_value_max = q_value.argmax(1).item()
-            print(q_value, type(q_value))
+            # print(q_value, type(q_value))
             q_value_max = q_value[0, q_value_max]
             return q_value_max, action
 
-    def QValues(self, states: list, batch_size:int):
+    def QValues(self, states: list, batch_size=1):
         """
+        根据一系列输入状态得到一系列的一组Qmax，用于batch learning函数
 
         :param batch_size: 观察到的一系列状态(batch size)
         :param states: 观察到的一系列状态(batch size)
@@ -144,7 +146,7 @@ class Agent:
 
     def store_exp(self) -> int:
         """
-        目前只能读取环境内一支股票的数据，也就是只有200多天的数据
+        目前只能读取环境内一支股票的数据，也就是只有3000多天的数据
 
         :return: 此时replay buffer中指针index的位置
         """
@@ -179,6 +181,7 @@ class Agent:
 
     def batch_learning(self, batch_size: int, env, save=True):
         """
+        从replay buffer中一次抽取batch size个数据进行训练。
 
         :param batch_size: 一次从buffer中抽取的数据数量。不能超过数据总量
         :param env: 交互的环境
@@ -188,7 +191,7 @@ class Agent:
         states, actions, rewards, states_future = self.Buffer.random_sample(batch_size, self.device)
         # 假设batch_size=16; 两个特征,一个特征看6天（2*6=12）. states.shape: torch.Size([16, 12])
 
-        current_q_values= self.QValues(states, batch_size)
+        current_q_values = self.QValues(states, batch_size)
         # print("current_q_value的shape是", current_q_values.shape)
 
         next_q_values = self.QValues(states_future, batch_size)
@@ -206,7 +209,7 @@ class Agent:
             torch.save(self.network, 'dqn_test.pth')
             return 0
         else:
-            print("Batch training done!\n")
+            # print("Batch training done!\n")
             return 0
 
     def step_learning(self, env, save=True, steps=1, load=False, load_buffer=False):
@@ -260,3 +263,54 @@ class Agent:
         else:
             print("Step training done!\n")
             return 0
+
+    def test_reset(self) -> None:
+        """
+        重新设置本金为10000，把日期调整到2023年的第一个数据上
+
+        :return: None
+        """
+        self.env.asset = 10000
+        self.env.stockHold = 0
+        self.env.cash = 10000
+        self.env.nowDate = dataset_divider
+
+    def test_model(self)->None:
+        """
+        环境会自动回到2023年的第一天，然后开始对2023年的所有股票数据进行测试,并记录到dataframe中，用于后续绘制图像
+
+        :return: None
+        """
+        terminated = False
+        truncated = False
+        self.test_reset()
+
+        observation = self.env._get_obs(self.env.nowDate)
+        observation = self.stateProcess(observation)
+
+        current_q_value, action = self.choose_action(observation, device=self.device)
+        current_q_value.requires_grad_(True)
+
+        while (not terminated) and (not truncated):
+            obs, reward, terminated, truncated, info = self.env.step(action)
+            obs = self.stateProcess(obs)
+            next_q_value, action = self.choose_action(obs, self.device)
+
+    def train_n_test(self, epoch, episode)->None:
+        """
+        将训练集中的数据全部存入replay buffer中并进行训练和测试，绘制本次测试的结果，然后保存模型
+
+        :param epoch: 外层大循环。总共进行多少次训练
+        :param episode: 内层小循环。从replay buffer中取出多少个batch来训练
+        :return:
+        """
+        self.store_exp()
+
+        for i in range(epoch):
+            print(f"------第{i}个epoch train开始------")
+            for j in range(episode):
+                self.batch_learning(batch_size=64, env=self.env, save=False)
+            print(f"------第{i}个epoch test开始------")
+            self.test_model()
+            self.env.render(epoch=i)
+            torch.save(self.network, 'DQN_{}.pth'.format(i))

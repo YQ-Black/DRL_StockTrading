@@ -7,6 +7,7 @@ import numpy as np
 import math
 import matplotlib.pyplot as plt
 
+
 class StockTradingEnv(gymnasium.Env):
     metadata = {"render_modes": ["human"], "render_fps": 4}
 
@@ -23,15 +24,14 @@ class StockTradingEnv(gymnasium.Env):
         '''
         # 基本量的设置
 
-        if(startDate<obsPeriod):
+        if (startDate < obsPeriod):
             print("Setting wrong! please check the start date and obs period!\n")
 
-
-        self.Company = {"Apple":"AAPL", "Tesla":"TSLA", "Amazon":"AMZN", "AMD":"AMD",
-                        "NVIDIA":"NVDA", "Microsoft":"MSFT", "Intel":"INTC", "Google":"GOOG"}
+        self.Company = {"Apple": "AAPL", "Amazon": "AMZN", "AMD": "AMD",
+                        "NVIDIA": "NVDA", "Microsoft": "MSFT", "Intel": "INTC", "Google": "GOOG"}
         self.com_name = company
         self.env_name = 'StockTradingEnv'
-        self.max_step = 250-startDate #暂定，可能还要修改（总数据252行，就用250去减）
+        self.max_step = 3273 - 2 - startDate  # 暂定，可能还要修改（总数据252行，就用250去减）3273表示2023年之前的全部股票数量。参考some notes第二条
         self.asset = money
         self.startDate = startDate
         self.tradingCosts = tradingCosts
@@ -41,7 +41,7 @@ class StockTradingEnv(gymnasium.Env):
         self.stockHold = 0
         self.cash = money
         self.assetHis = 0
-        self.threshold = 0.1*money
+        self.threshold = 0.1 * money
         self.gamma = gamma
 
         # gym库的设置
@@ -61,15 +61,12 @@ class StockTradingEnv(gymnasium.Env):
 
             # 新添加几列别的属性
             self.stockData["Stock Hold"] = 0.
-            self.stockData["Cash Hold"]  = 0.
+            self.stockData["Cash Hold"] = 0.
             self.stockData["Asset"] = 0.
         else:
             print("Error! Initialization failed. Reason: No data found, please download data first.\n")
 
-
-
-
-    def _get_obs(self, index:int)->list:
+    def _get_obs(self, index: int) -> list:
         '''
         Return observations as Open and Close data
 
@@ -77,10 +74,10 @@ class StockTradingEnv(gymnasium.Env):
         :return: list类型
         '''
         # [0:2]对应第0天和第1天 [1:2]对应第1天 [0:1]对应第0天
-        return [self.stockData['Open'][index-(self.obsPeriod+1):index].tolist(),
-                self.stockData['High'][index-(self.obsPeriod+1):index].tolist()]
+        return [self.stockData['Open'][index - (self.obsPeriod + 1):index].tolist(),
+                self.stockData['High'][index - (self.obsPeriod + 1):index].tolist()]
 
-    def _get_info(self, index:int)->int:
+    def _get_info(self, index: int) -> int:
         '''
         返回info，暂定为股票当日的volume
 
@@ -90,28 +87,27 @@ class StockTradingEnv(gymnasium.Env):
         return self.stockData['Volume'][index]
         # 先列后行
 
-
-    def reset(self, seed=None, options=None)->tuple:
+    def reset(self, seed=None, options=None) -> tuple:
         super().reset(seed=seed)
         # 对基本量的设置
         self.Return = 0
         self.step_cnt = 0
         self.endDate = self.max_step
-        self.nowDate = self.startDate # self.nowIndex = 0 下面observation直接变成[nowIndex:nowIndex + self.obsPeriod](which is better?)
+        self.nowDate = self.startDate  # self.nowIndex = 0 下面observation直接变成[nowIndex:nowIndex + self.obsPeriod](which is better?)
 
         # observation暂定为Open和Close两个特征，总共有obsPeriod个。Return type: list
         # info暂定为Volume这一个特征，总共一个，当日的volume。Return type: int
         # 先行后列
         t = self.startDate
         self.stockData.loc[t, "Stock Hold"] = self.stockHold
-        self.stockData.loc[t, "Cash Hold"]  = self.cash
-        self.stockData.loc[t, "Asset"]      = self.asset
+        self.stockData.loc[t, "Cash Hold"] = self.cash
+        self.stockData.loc[t, "Asset"] = self.asset
 
         observation = self._get_obs(self.nowDate)
         info = self._get_info(self.nowDate)
         return observation, info
 
-    def step(self, action)->tuple:
+    def step(self, action) -> tuple:
         self._take_action(action)
 
         self.nowDate = self.nowDate + 1
@@ -132,10 +128,12 @@ class StockTradingEnv(gymnasium.Env):
             truncated = False
             self.step_cnt = self.step_cnt + 1
 
-        return observation ,reward, terminated, truncated, info
+        if self.stockData["Date"][t] == "2023-12-18":
+            terminated = True
 
+        return observation, reward, terminated, truncated, info
 
-    def _take_action(self, action:int)->int:
+    def _take_action(self, action: int) -> int:
         '''
         目的：按照输入的action来更新有关的属性与数值.
         暂定为，根据Open的数据来确定是否buy，hold，sell,在close时结算本日
@@ -154,10 +152,10 @@ class StockTradingEnv(gymnasium.Env):
             # self.stockData["Asset"] = 0
 
         elif action == 1:
-            cost = self.stockData['Open'][today] * (1+self.tradingCosts)
+            cost = self.stockData['Open'][today] * (1 + self.tradingCosts)
             diff = cash - cost
-            if(diff >= 0):
-                stockBuy = math.floor(cash/cost)
+            if (diff >= 0):
+                stockBuy = math.floor(cash / cost)
                 self.cash = cash - stockBuy * cost
                 self.stockHold = self.stockHold + stockBuy
                 self.assetHis = self.asset
@@ -169,8 +167,8 @@ class StockTradingEnv(gymnasium.Env):
                 self.asset = self.cash + self.stockData['Close'][today] * self.stockHold
 
         elif action == -1:
-            if(self.stockHold >=0):
-                revenue = self.stockData['Open'][today] * (1-self.tradingCosts) * self.stockHold
+            if (self.stockHold >= 0):
+                revenue = self.stockData['Open'][today] * (1 - self.tradingCosts) * self.stockHold
                 self.cash = self.cash + revenue
                 self.stockHold = 0
                 self.assetHis = self.asset
@@ -189,11 +187,11 @@ class StockTradingEnv(gymnasium.Env):
         print("Asset: ", self.stockData["Asset"][t], " in day ", t)
         print("Stock Hold: ", self.stockData["Stock Hold"][t], " in day ", t)
         print("Cash Hold: ", self.stockData["Cash Hold"][t], " in day ", t)
-        print("Asset yesterday: ", self.stockData["Asset"][t-1], " in day ", t)
+        print("Asset yesterday: ", self.stockData["Asset"][t - 1], " in day ", t)
         print("------------------------------------")
         print('\n')
 
-    def takeRandAct(self)->int:
+    def takeRandAct(self) -> int:
         '''
         随机在-1，0，1之间选择一个整数，作为action，用于简单测试
         :return: -1 / 0 / 1
@@ -207,19 +205,19 @@ class StockTradingEnv(gymnasium.Env):
         :param epoch: 表示当前是第几个epoch，用于保存图片取名时使用
         :return: 根据数据画出股票数据和拥有资产的折线图
         '''
-        df = self.stockData
-        fig, axes = plt.subplots(nrows=2, ncols=1, sharex=True)
-        axes[0].plot(df["Date"], df["Close"])
-        axes[0].set_title(f"{self.com_name} Stock Close Price")
-        axes[1].plot(df["Asset"])
-        axes[1].set_title("Asset Hold")
+        df = self.stockData.loc[3274:3513, ['Date', 'Close', 'Asset']].copy()  # 3274:2023-1-05; 3513:2023-12-18
+        print(df)
+        plt.figure()
+        plt.plot(df['Date'], df['Asset'])
+        plt.xlabel('Date')
+        plt.ylabel('Asset')
+        plt.title('Asset Trend')
         if epoch == None:
             plt.savefig(fname="example.jpg")
-            plt.show()
+
         else:
             save_path = f"Figures/fig_{epoch}.jpg"
             plt.savefig(fname=save_path)
-
 
     def close(self):
         '''
@@ -227,5 +225,3 @@ class StockTradingEnv(gymnasium.Env):
         :return: nothing
         '''
         print("Closed Successfully\n")
-
-

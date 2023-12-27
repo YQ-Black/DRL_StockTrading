@@ -57,14 +57,22 @@ class Agent:
         :param optimization: 目前提供：Adam, SGD
         :param learningrate: 学习率，default=0.01
         """
+        # 初始化所有的character
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.network = DQN(numberOfInputs=input_features, numberOfNeurons=256, numberOfOutputs=3)
         self.network = self.network.cuda()
+        self.target_network = DQN(numberOfInputs=input_features, numberOfNeurons=256, numberOfOutputs=3)
+        self.target_network = self.target_network.cuda()
         self.parameters = self.network.parameters()
         self.learningRate = learningrate
         self.Buffer = ReplayBuffer()
         self.env = env
 
+        # 复制network的参数给target network
+        network_paras = self.network.state_dict()
+        self.target_network.load_state_dict(network_paras)
+
+        # 选择loss function 和 optimizer
         Lossfunc = {"MSE": nn.MSELoss(), "L1Loss": nn.L1Loss(), "C-E Loss": nn.CrossEntropyLoss()}
         if (lossfunc in Lossfunc):
             loss_fn = Lossfunc[lossfunc]
@@ -91,7 +99,7 @@ class Agent:
         state = temp_0 + temp_1
         return state
 
-    def choose_action(self, state: list, device) -> tuple:
+    def choose_action(self, state: list, device, network) -> tuple:
         """
         根据当前的state判断哪个action的q_value最大
 
@@ -99,22 +107,44 @@ class Agent:
         :param device: 操作使用的设备，cpu/cuda
         :return: ①q_value_max: tensor(tensor(1.2957, device='cuda:0')) ②q值最大的action序号: -1, 0, 1(int)
         """
-        with torch.no_grad():
-            # unsqueeze：给生成的tensor多一个维度，例如原来维度是[2,7], 现在维度是[1,2,7]
-            state = torch.tensor(state, dtype=torch.float32,
-                                 device=device, requires_grad=True).unsqueeze(0)
-            # tensor([[  149.5674,   167.7487, 15643.1562, 15354.1562]], device='cuda:0',
-            #        requires_grad=True) torch.Size([1, x]) x=特征数
-            # print(state, state.shape)
-            q_value = self.network(state)
-            print(q_value, type(q_value))
-            action = q_value.argmax(1).item() - 1
-            q_value_max = q_value.argmax(1).item()
-            # print(q_value, type(q_value))
-            q_value_max = q_value[0, q_value_max]
-            return q_value_max, action
+        if network == self.network:
+            with torch.no_grad():
+                # unsqueeze：给生成的tensor多一个维度，例如原来维度是[2,7], 现在维度是[1,2,7]
+                state = torch.tensor(state, dtype=torch.float32,
+                                     device=device, requires_grad=True).unsqueeze(0)
+                # tensor([[  149.5674,   167.7487, 15643.1562, 15354.1562]], device='cuda:0',
+                #        requires_grad=True) torch.Size([1, x]) x=特征数
+                # print(state, state.shape)
+                q_value = self.network(state)
+                print(q_value, type(q_value))
+                action = q_value.argmax(1).item() - 1
+                q_value_max = q_value.argmax(1).item()
+                # print(q_value, type(q_value))
+                q_value_max = q_value[0, q_value_max]
+                return q_value_max, action
 
-    def QValues(self, states: list, batch_size=1):
+        elif network == self.target_network:
+            with torch.no_grad():
+                # unsqueeze：给生成的tensor多一个维度，例如原来维度是[2,7], 现在维度是[1,2,7]
+                state = torch.tensor(state, dtype=torch.float32,
+                                     device=device, requires_grad=True).unsqueeze(0)
+                # tensor([[  149.5674,   167.7487, 15643.1562, 15354.1562]], device='cuda:0',
+                #        requires_grad=True) torch.Size([1, x]) x=特征数
+                # print(state, state.shape)
+                q_value = self.target_network(state)
+                print(q_value, type(q_value))
+                action = q_value.argmax(1).item() - 1
+                q_value_max = q_value.argmax(1).item()
+                # print(q_value, type(q_value))
+                q_value_max = q_value[0, q_value_max]
+                return q_value_max, action
+        else:
+            print("the network you choose is wrong\n"
+                  "please choose target_network or network!\n")
+            return -1, -1
+
+
+    def QValues(self, states: list, network, batch_size=1):
         """
         根据一系列输入状态得到一系列的一组Qmax，用于batch learning函数
 
@@ -124,25 +154,47 @@ class Agent:
         """
         # states = torch.tensor(states, dtype=torch.float32,
         #                      device=self.device, requires_grad=True).unsqueeze(0)
-        q_values = self.network(states)
 
-        q_values_list = []
+        if network == self.network:
+            q_values = self.network(states)
 
-        for i in range(batch_size):
-            q_value = q_values[0][i]
-            q_value = q_value.unsqueeze(0)
-            # print(q_value, q_value.shape)
-            q_index = q_value.argmax(1).item()
-            # print(q_index)
-            q_value_max = q_value[0, q_index]
-            q_value_max = [q_value_max]
-            q_values_list = q_values_list + q_value_max
-            # print(q_value[0, q_index])
+            q_values_list = []
 
-        q_values_max = torch.tensor(q_values_list, dtype=torch.float32,
-                                    device=self.device, requires_grad=True).unsqueeze(0)
+            for i in range(batch_size):
+                q_value = q_values[0][i]
+                q_value = q_value.unsqueeze(0)
+                q_index = q_value.argmax(1).item()
+                q_value_max = q_value[0, q_index]
+                q_value_max = [q_value_max]
+                q_values_list = q_values_list + q_value_max
 
-        return q_values_max
+            q_values_max = torch.tensor(q_values_list, dtype=torch.float32,
+                                        device=self.device, requires_grad=True).unsqueeze(0)
+
+            return q_values_max
+
+        elif network == self.target_network:
+            q_values = self.target_network(states)
+
+            q_values_list = []
+
+            for i in range(batch_size):
+                q_value = q_values[0][i]
+                q_value = q_value.unsqueeze(0)
+                q_index = q_value.argmax(1).item()
+                q_value_max = q_value[0, q_index]
+                q_value_max = [q_value_max]
+                q_values_list = q_values_list + q_value_max
+
+            q_values_max = torch.tensor(q_values_list, dtype=torch.float32,
+                                        device=self.device, requires_grad=True).unsqueeze(0)
+
+            return q_values_max
+
+        else:
+            print("the network you choose is wrong\n"
+                  "please choose target_network or network!\n")
+            return -1
 
     def store_exp(self) -> int:
         """
@@ -179,7 +231,7 @@ class Agent:
 
         return 0
 
-    def batch_learning(self, batch_size: int, env, save=True):
+    def batch_learning(self, batch_size: int, env, save=True) -> int:
         """
         从replay buffer中一次抽取batch size个数据进行训练。
 
@@ -191,13 +243,10 @@ class Agent:
         states, actions, rewards, states_future = self.Buffer.random_sample(batch_size, self.device)
         # 假设batch_size=16; 两个特征,一个特征看6天（2*6=12）. states.shape: torch.Size([16, 12])
 
-        current_q_values = self.QValues(states, batch_size)
-        # print("current_q_value的shape是", current_q_values.shape)
+        current_q_values = self.QValues(network=self.network, states=states, batch_size=batch_size)
 
-        next_q_values = self.QValues(states_future, batch_size)
-        # print("next_q_values的shape是", next_q_values.shape)
+        next_q_values = self.QValues(network=self.target_network, states=states, batch_size=batch_size)
         target_q_values = rewards + env.gamma * next_q_values
-        # print("target_q_value的shape是",target_q_values.shape)
 
         loss = self.loss_fn(current_q_values, target_q_values)
 
@@ -212,56 +261,54 @@ class Agent:
             # print("Batch training done!\n")
             return 0
 
-    def step_learning(self, env, save=True, steps=1, load=False, load_buffer=False):
+    def store_experience_n_train(self, env, save=True, steps=1, load=False, load_buffer=False) -> int:
         """
-        学习step次直到terminated或者truncated，保存模型
+        顺序学习股票数据，在放入buffer的同时小小训练一下网络
 
         :param env: 需要与agent交互的环境
         :param save: 是否保存模型
         :param steps: 总共训练多少个step
         :param load: 是否加载模型，目前没有训练
         :param load_buffer: 是否把这次的结果存入replay buffer
-        :return: 啥也不返回
+        :return: 0
         """
         device = self.device
         observation, info = env.reset()
         observation = self.stateProcess(observation)
         # 暂且不动info了。info = torch.tensor(info, device=self.device)
-        current_q_value, action = self.choose_action(observation, device=device)
+        current_q_value, action = self.choose_action(observation, device=device, network=self.network)
         current_q_value.requires_grad_(True)
-        terminated = 0
-        truncated = 0
+        terminated = False
+        truncated = False
+
         for i in range(steps):
             print(f"------第{i + 1}轮step learning开始------")
-            j = 0
             while (not terminated) and (not truncated):
-                obs, reward, terminated, truncated, info = env.step(action)
-                obs = self.stateProcess(obs)
-                next_q_value, action = self.choose_action(obs, device)
+                next_obs, reward, terminated, truncated, info = env.step(action)
+                next_obs = self.stateProcess(next_obs)
+
+                exp = self.Buffer.exp_capsu(observation, action, reward, next_obs)
+                self.Buffer.push(exp)
+
+                next_q_value, action = self.choose_action(next_obs, device, network=self.target_network)
                 target_q_value = reward + (env.gamma * next_q_value)
                 target_q_value.requires_grad_(True)
                 print("Current q value: ", current_q_value)
                 print("Target q value: ", target_q_value)
+
                 loss = self.loss_fn(current_q_value, target_q_value)
                 self.optim.zero_grad()
                 loss.backward()
                 self.optim.step()
-                j = j + 1
-            else:
-                observation, info = env.reset()
-                observation = self.stateProcess(observation)
-                current_q_value, action = self.choose_action(observation, device=device)
-                current_q_value.requires_grad_(True)
-                terminated = 0
-                truncated = 0
 
-            print(f"本轮总共训练了{j}次")
+                current_q_value, action = self.choose_action(next_obs, device=device, network=self.network)
 
         if save:
             print("Step training done! Saving model......\n")
             torch.save(self.network, 'dqn_test.pth')
+            return 0
         else:
-            print("Step training done!\n")
+            print("------ Experience done! ------\n")
             return 0
 
     def test_reset(self) -> None:
@@ -275,7 +322,7 @@ class Agent:
         self.env.cash = 10000
         self.env.nowDate = dataset_divider
 
-    def test_model(self)->None:
+    def test_model(self) -> None:
         """
         环境会自动回到2023年的第一天，然后开始对2023年的所有股票数据进行测试,并记录到dataframe中，用于后续绘制图像
 
@@ -288,15 +335,15 @@ class Agent:
         observation = self.env._get_obs(self.env.nowDate)
         observation = self.stateProcess(observation)
 
-        current_q_value, action = self.choose_action(observation, device=self.device)
+        current_q_value, action = self.choose_action(observation, device=self.device, network=self.network)
         current_q_value.requires_grad_(True)
 
         while (not terminated) and (not truncated):
             obs, reward, terminated, truncated, info = self.env.step(action)
             obs = self.stateProcess(obs)
-            next_q_value, action = self.choose_action(obs, self.device)
+            next_q_value, action = self.choose_action(obs, self.device, network=self.network)
 
-    def train_n_test(self, epoch, episode)->None:
+    def train_n_test(self, epoch, episode) -> None:
         """
         将训练集中的数据全部存入replay buffer中并进行训练和测试，绘制本次测试的结果，然后保存模型
 
@@ -310,6 +357,10 @@ class Agent:
             print(f"------第{i}个epoch train开始------")
             for j in range(episode):
                 self.batch_learning(batch_size=64, env=self.env, save=False)
+
+            parameters = self.network.state_dict()
+            self.target_network.load_state_dict(parameters) # update target network
+
             print(f"------第{i}个epoch test开始------")
             self.test_model()
             self.env.render(epoch=i)
